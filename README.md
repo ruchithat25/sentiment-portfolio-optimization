@@ -2,6 +2,8 @@
 
 A quantitative finance project that investigates whether financial-news sentiment can be incorporated into a constrained portfolio allocation strategy for major Indian equities.
 
+---
+
 ## Project Overview
 
 This project combines:
@@ -12,6 +14,7 @@ This project combines:
 * Lagged sentiment signals
 * Portfolio optimization
 * Benchmark comparison
+* Transaction-cost analysis
 * Risk and performance analysis
 
 The objective is to investigate whether information extracted from financial news can be used as an input to portfolio construction.
@@ -158,13 +161,39 @@ The portfolio is subject to:
 
 ```text
 Minimum weight per stock = 5%
+
 Maximum weight per stock = 40%
+
 Total portfolio weight = 100%
 ```
 
-Only dates where all five stocks have valid observations are used for the constrained portfolio calculation.
+The portfolio is re-optimized each trading day using the stocks for which valid lagged sentiment and return observations are available.
 
-This avoids infeasible allocations caused by having too few securities available on a particular date.
+Therefore, the number of stocks in the active portfolio can vary across dates.
+
+In the current sample:
+
+* Average stocks per day: **4.30**
+* Minimum stocks on a day: **3**
+* Maximum stocks on a day: **5**
+* Total portfolio dates: **20**
+
+Stocks unavailable on a particular date are assigned a portfolio weight of 0% for turnover calculation.
+
+---
+
+### 9. Transaction Costs
+
+A transaction-cost assumption of **0.10% per unit of turnover** is applied to the portfolio.
+
+Turnover is calculated from changes in portfolio weights between trading days.
+
+The analysis distinguishes between:
+
+* Initial portfolio formation turnover
+* Ongoing turnover
+
+This allows the research to examine how portfolio trading activity affects net performance.
 
 ---
 
@@ -172,13 +201,15 @@ This avoids infeasible allocations caused by having too few securities available
 
 The sentiment-weighted portfolio is compared with an equal-weight portfolio.
 
-The equal-weight benchmark assigns:
+The benchmark allocates the available portfolio capital equally across the stocks available on each trading day.
+
+For example, when five stocks are available:
 
 ```text
 1 / 5 = 20%
 ```
 
-to each stock.
+When fewer stocks are available, the capital is distributed equally across the available stocks.
 
 This provides a simple benchmark for evaluating whether the sentiment-based allocation produces different portfolio characteristics.
 
@@ -206,26 +237,61 @@ Because the current test contains only a small number of observations, the annua
 
 Measures the largest decline from a previous portfolio peak.
 
+### Turnover
+
+Measures the amount of portfolio weight that changes between trading periods.
+
+### Transaction Costs
+
+Measures the estimated performance impact of the assumed trading-cost rate.
+
 ---
 
 ## Current Results
 
 The current portfolio comparison contains:
 
-**12 complete trading days**
+**20 trading days**
 
 | Metric                | Equal Weight | Sentiment Weighted |
 | --------------------- | -----------: | -----------------: |
-| Trading Days          |           12 |                 12 |
-| Total Return          |       -4.10% |             -5.14% |
-| Annualized Volatility |       12.05% |             12.70% |
-| Sharpe Ratio          |        -7.23 |              -8.64 |
-| Maximum Drawdown      |       -2.78% |             -3.96% |
-| Final Portfolio Value |       0.9590 |             0.9486 |
+| Trading Days          |           20 |                 20 |
+| Total Return          |       -6.48% |             -8.99% |
+| Annualized Volatility |       10.56% |             14.40% |
+| Sharpe Ratio          |        -7.93 |              -8.15 |
+| Maximum Drawdown      |       -7.12% |            -10.62% |
+| Final Portfolio Value |       0.9352 |             0.9101 |
 
 For this particular test window, the sentiment-weighted portfolio had lower cumulative performance and higher volatility and drawdown than the equal-weight benchmark.
 
-However, the sample is too small to determine whether this difference represents a persistent characteristic of the strategy.
+The sentiment-weighted portfolio also had higher ongoing turnover:
+
+* Equal-weight average ongoing turnover: **2.00%**
+* Sentiment-weighted average ongoing turnover: **37.10%**
+
+Estimated total transaction costs were:
+
+* Equal-weight: **0.10%**
+* Sentiment-weighted: **0.84%**
+
+These results describe this specific sample and should not be interpreted as evidence of persistent future performance.
+
+---
+
+## Transaction-Cost Sensitivity
+
+The project evaluates how different transaction-cost assumptions affect the sentiment-weighted portfolio.
+
+| Transaction Cost | Total Return | Annualized Volatility | Sharpe Ratio | Maximum Drawdown |
+| ---------------- | -----------: | --------------------: | -----------: | ---------------: |
+| 0.00%            |       -8.21% |                14.40% |        -7.42 |          -10.02% |
+| 0.05%            |       -8.60% |                14.40% |        -7.79 |          -10.32% |
+| 0.10%            |       -8.99% |                14.40% |        -8.15 |          -10.62% |
+| 0.20%            |       -9.75% |                14.41% |        -8.88 |          -11.23% |
+
+The sensitivity analysis shows how increasing assumed trading costs affects net portfolio performance.
+
+The assumed **0.10% transaction cost is a modeling assumption**, not an estimate derived from observed bid-ask spreads, taxes, or market impact.
 
 ---
 
@@ -261,11 +327,23 @@ The current implementation has several important limitations.
 
 The NewsAPI developer account restricts the historical period available to the project.
 
+The current news sample covers approximately one month.
+
 ### Small Backtest Sample
 
-Only 12 complete portfolio dates are currently available.
+The current portfolio backtest contains only **20 trading days**.
 
-This makes performance metrics, particularly annualized statistics, highly unstable.
+Although this is an improvement over the previous complete-universe approach, the sample remains too short for strong statistical conclusions.
+
+Annualized performance metrics should therefore be interpreted cautiously.
+
+### Variable Portfolio Universe
+
+Not every stock has valid sentiment information on every trading day.
+
+The current implementation handles this by optimizing across the available stocks rather than discarding the entire date.
+
+This introduces variation in the number of securities held by the portfolio.
 
 ### Sentiment Carry-Forward Assumption
 
@@ -279,15 +357,25 @@ The project relies on a single news provider and therefore does not capture ever
 
 ### Simple Portfolio Allocation
 
-The current allocation method uses sentiment-based scores subject to fixed portfolio constraints. It does not yet incorporate transaction costs, turnover, liquidity, factor exposures, or a formal convex optimization objective.
+The current allocation method uses sentiment-based scores subject to fixed portfolio constraints.
 
-### No Transaction Costs
+It does not yet incorporate a formal risk-optimization objective, factor exposures, liquidity constraints, or volatility targeting.
 
-Trading costs, bid-ask spreads, taxes, and market impact are not currently modeled.
+### Transaction-Cost Assumption
+
+The project models transaction costs using a fixed 0.10% rate.
+
+Actual trading costs can vary depending on spreads, brokerage, taxes, liquidity, and market impact.
 
 ### No Statistical Significance Testing
 
 The current sample is insufficient for robust hypothesis testing.
+
+### Short Evaluation Window
+
+The current results cover only a short period from late August through September 2026.
+
+The results should therefore be treated as an initial research experiment rather than evidence of a persistent investment effect.
 
 ---
 
@@ -310,10 +398,16 @@ Lagged Signal
   ↓
 Portfolio Construction
   ↓
+Transaction Costs
+  ↓
 Benchmark
   ↓
 Risk Analysis
+  ↓
+Sensitivity Analysis
 ```
+
+The current sample does not provide enough historical data to determine whether the observed performance differences would persist over longer periods.
 
 A longer historical news dataset would be required before making stronger conclusions about predictive performance.
 
@@ -325,16 +419,18 @@ Potential extensions include:
 
 1. Expand the historical news dataset.
 2. Increase the number of stocks in the universe.
-3. Add transaction costs.
-4. Measure portfolio turnover.
-5. Compare multiple sentiment models.
-6. Test different sentiment aggregation methods.
-7. Compare different signal horizons.
-8. Perform walk-forward backtesting.
-9. Add statistical significance tests.
-10. Compare against additional portfolio strategies.
-11. Introduce factor controls such as momentum and volatility.
-12. Test alternative portfolio optimization objectives.
+3. Compare multiple sentiment models.
+4. Test different sentiment aggregation methods.
+5. Compare different signal horizons.
+6. Perform walk-forward backtesting over a longer historical period.
+7. Add statistical significance tests.
+8. Compare against additional portfolio strategies.
+9. Introduce factor controls such as momentum and volatility.
+10. Test alternative portfolio optimization objectives.
+11. Add volatility targeting and risk constraints.
+12. Investigate sector-neutral portfolio construction.
+13. Improve news coverage using multiple data sources.
+14. Calibrate transaction costs using market liquidity and bid-ask spread information.
 
 ---
 
@@ -355,6 +451,8 @@ finance/
 ├── portfolio_backtest.py
 ├── portfolio_optimizer.py
 ├── portfolio_comparison.py
+├── transaction_cost_sensitivity.py
+├── research_summary.py
 │
 ├── data/
 │   ├── prices.csv
@@ -367,7 +465,9 @@ finance/
 │   ├── portfolio_results.csv
 │   ├── optimized_portfolio.csv
 │   ├── portfolio_comparison.csv
-│   └── portfolio_comparison.png
+│   ├── portfolio_comparison.png
+│   ├── transaction_cost_sensitivity.csv
+│   └── research_summary.csv
 │
 ├── requirements.txt
 └── README.md

@@ -7,149 +7,55 @@ RESULTS_FILE = "data/portfolio_results.csv"
 
 MIN_WEIGHT = 0.05
 MAX_WEIGHT = 0.40
-
-# Transaction cost assumption
 TRANSACTION_COST = 0.001
 
-
-# --------------------------------------------------
-# Load data
-# --------------------------------------------------
-
 df = pd.read_csv(INPUT_FILE)
-
 df["date"] = pd.to_datetime(df["date"])
+df = df.sort_values(["date", "ticker"]).copy()
 
-df = df.sort_values(
-    ["date", "ticker"]
-)
-
-
-# --------------------------------------------------
-# Keep only dates where all stocks are available
-# --------------------------------------------------
-
-all_tickers = sorted(
-    df["ticker"].unique()
-)
-
-n_stocks = len(all_tickers)
-
-valid_dates = (
-    df.groupby("date")["ticker"]
-    .nunique()
-)
-
-valid_dates = valid_dates[
-    valid_dates == n_stocks
-].index
-
-df = df[
-    df["date"].isin(valid_dates)
-].copy()
-
-print(
-    f"Stocks in universe: {n_stocks}"
-)
-
-print(
-    f"Valid portfolio dates: "
-    f"{len(valid_dates)}"
-)
-
-
-# --------------------------------------------------
-# Calculate constrained sentiment weights
-# --------------------------------------------------
 
 def calculate_weights(group):
-
-    sentiment = group[
-        "lagged_sentiment"
-    ].to_numpy(dtype=float)
-
+    sentiment = group["lagged_sentiment"].to_numpy(dtype=float)
     n = len(sentiment)
 
     if n * MIN_WEIGHT > 1:
         raise ValueError(
-            f"Cannot allocate {n} stocks "
-            f"with minimum weight {MIN_WEIGHT:.2f}"
+            f"Cannot allocate {n} stocks with minimum weight {MIN_WEIGHT:.2f}"
         )
 
     if n * MAX_WEIGHT < 1:
         raise ValueError(
-            f"Cannot allocate {n} stocks "
-            f"with maximum weight {MAX_WEIGHT:.2f}"
+            f"Cannot allocate {n} stocks with maximum weight {MAX_WEIGHT:.2f}"
         )
 
-    # Start every stock at minimum weight
-    weights = np.full(
-        n,
-        MIN_WEIGHT
-    )
+    weights = np.full(n, MIN_WEIGHT)
 
-    remaining = (
-        1.0 - weights.sum()
-    )
+    remaining = 1.0 - weights.sum()
 
-    # Convert sentiment into positive scores
-    scores = (
-        sentiment
-        - sentiment.min()
-        + 0.1
-    )
+    scores = sentiment - sentiment.min() + 0.1
 
     if scores.sum() == 0:
         scores = np.ones(n)
 
-    scores = (
-        scores / scores.sum()
-    )
+    scores = scores / scores.sum()
 
-    # Allocate remaining weight
-    # according to sentiment
-    weights += (
-        remaining * scores
-    )
+    weights += remaining * scores
 
-    # --------------------------------------------------
-    # Enforce maximum weight
-    # --------------------------------------------------
+    while np.any(weights > MAX_WEIGHT + 1e-12):
+        excess = np.maximum(weights - MAX_WEIGHT, 0).sum()
 
-    while np.any(
-        weights > MAX_WEIGHT + 1e-12
-    ):
+        weights = np.minimum(weights, MAX_WEIGHT)
 
-        excess = np.maximum(
-            weights - MAX_WEIGHT,
-            0
-        ).sum()
-
-        weights = np.minimum(
-            weights,
-            MAX_WEIGHT
-        )
-
-        available = (
-            weights
-            < MAX_WEIGHT - 1e-12
-        )
+        available = weights < MAX_WEIGHT - 1e-12
 
         if not available.any():
             break
 
-        available_scores = (
-            scores.copy()
-        )
-
-        available_scores[
-            ~available
-        ] = 0
+        available_scores = scores.copy()
+        available_scores[~available] = 0
 
         if available_scores.sum() == 0:
-            available_scores[
-                available
-            ] = 1
+            available_scores[available] = 1
 
         weights += (
             excess
@@ -157,25 +63,15 @@ def calculate_weights(group):
             / available_scores.sum()
         )
 
-    # --------------------------------------------------
-    # Correct floating-point difference
-    # --------------------------------------------------
-
-    difference = (
-        1.0 - weights.sum()
-    )
+    difference = 1.0 - weights.sum()
 
     if abs(difference) > 1e-12:
-
         available = np.where(
-            weights
-            < MAX_WEIGHT - 1e-12
+            weights < MAX_WEIGHT - 1e-12
         )[0]
 
         if len(available) > 0:
-            weights[
-                available[0]
-            ] += difference
+            weights[available[0]] += difference
 
     return pd.Series(
         weights,
@@ -184,25 +80,20 @@ def calculate_weights(group):
 
 
 # --------------------------------------------------
-# Calculate weights for each date
+# CALCULATE DAILY PORTFOLIO WEIGHTS
 # --------------------------------------------------
 
 df["portfolio_weight"] = np.nan
 
 for date, group in df.groupby("date"):
 
-    weights = calculate_weights(
-        group
-    )
+    weights = calculate_weights(group)
 
-    df.loc[
-        group.index,
-        "portfolio_weight"
-    ] = weights.values
+    df.loc[group.index, "portfolio_weight"] = weights.values
 
 
 # --------------------------------------------------
-# Portfolio returns
+# PORTFOLIO RETURNS
 # --------------------------------------------------
 
 df["weighted_return"] = (
@@ -213,64 +104,66 @@ df["weighted_return"] = (
 portfolio = (
     df.groupby("date")
     .agg(
-        portfolio_return=(
-            "weighted_return",
-            "sum"
-        )
+        portfolio_return=("weighted_return", "sum")
     )
     .reset_index()
 )
 
 
 # --------------------------------------------------
-# Calculate turnover
+# TURNOVER
 # --------------------------------------------------
 
-df["previous_weight"] = (
-    df.groupby("ticker")[
-        "portfolio_weight"
-    ].shift(1)
+# Create a complete date × ticker grid.
+# This allows stocks missing on a particular day
+# to correctly move from their previous weight to 0.
+
+dates = sorted(df["date"].unique())
+tickers = sorted(df["ticker"].unique())
+
+full_index = pd.MultiIndex.from_product(
+    [dates, tickers],
+    names=["date", "ticker"]
 )
 
-df["weight_change"] = (
-    df["portfolio_weight"]
-    - df["previous_weight"]
+weights = (
+    df.set_index(["date", "ticker"])["portfolio_weight"]
+    .reindex(full_index)
+    .fillna(0.0)
+    .reset_index()
 )
 
+weights = weights.sort_values(["ticker", "date"])
 
-# First portfolio formation:
-# previous holdings are assumed to be zero.
-df["weight_change"] = (
-    df["weight_change"]
-    .fillna(df["portfolio_weight"])
+weights["previous_weight"] = (
+    weights
+    .groupby("ticker")["portfolio_weight"]
+    .shift(1)
+    .fillna(0.0)
 )
 
+weights["weight_change"] = (
+    weights["portfolio_weight"]
+    - weights["previous_weight"]
+)
 
 turnover = (
-    df.groupby("date")[
-        "weight_change"
-    ]
-    .apply(
-        lambda x: x.abs().sum()
-    )
-    .reset_index(
-        name="turnover"
-    )
+    weights
+    .groupby("date")["weight_change"]
+    .apply(lambda x: x.abs().sum())
+    .reset_index(name="turnover")
 )
 
 
 # --------------------------------------------------
-# Identify initial vs ongoing turnover
+# INITIAL FORMATION
 # --------------------------------------------------
 
-first_date = (
-    portfolio["date"].min()
-)
+first_date = turnover["date"].min()
 
 turnover["initial_formation"] = (
     turnover["date"] == first_date
 )
-
 
 turnover["ongoing_turnover"] = (
     turnover["turnover"]
@@ -283,7 +176,7 @@ turnover.loc[
 
 
 # --------------------------------------------------
-# Merge turnover into portfolio
+# TRANSACTION COSTS
 # --------------------------------------------------
 
 portfolio = portfolio.merge(
@@ -292,26 +185,15 @@ portfolio = portfolio.merge(
     how="left"
 )
 
-
-# --------------------------------------------------
-# Transaction costs
-# --------------------------------------------------
-
 portfolio["transaction_cost"] = (
     portfolio["turnover"]
     * TRANSACTION_COST
 )
 
-
 portfolio["ongoing_transaction_cost"] = (
     portfolio["ongoing_turnover"]
     * TRANSACTION_COST
 )
-
-
-# --------------------------------------------------
-# Net return
-# --------------------------------------------------
 
 portfolio["net_return"] = (
     portfolio["portfolio_return"]
@@ -320,96 +202,81 @@ portfolio["net_return"] = (
 
 
 # --------------------------------------------------
-# Cumulative returns
+# CUMULATIVE PERFORMANCE
 # --------------------------------------------------
 
 portfolio["gross_cumulative"] = (
     1 + portfolio["portfolio_return"]
 ).cumprod()
 
-
 portfolio["net_cumulative"] = (
     1 + portfolio["net_return"]
 ).cumprod()
 
-
 portfolio["cumulative_return"] = (
-    portfolio["net_cumulative"]
-    - 1
+    portfolio["net_cumulative"] - 1
 )
 
 
 # --------------------------------------------------
-# Performance metrics
+# PERFORMANCE METRICS
 # --------------------------------------------------
 
-returns = (
-    portfolio["net_return"]
-)
-
-gross_returns = (
-    portfolio["portfolio_return"]
-)
-
+returns = portfolio["net_return"]
+gross_returns = portfolio["portfolio_return"]
 
 total_return = (
-    1 + returns
-).prod() - 1
-
+    (1 + returns).prod() - 1
+)
 
 gross_total_return = (
-    1 + gross_returns
-).prod() - 1
-
+    (1 + gross_returns).prod() - 1
+)
 
 volatility = (
     returns.std()
     * np.sqrt(252)
 )
 
-
 sharpe = (
-    (returns.mean() * 252)
-    / volatility
+    (returns.mean() * 252) / volatility
     if volatility != 0
     else np.nan
 )
-
 
 wealth = (
     1 + returns
 ).cumprod()
 
-
-running_max = (
-    wealth.cummax()
-)
-
+running_max = wealth.cummax()
 
 drawdown = (
     wealth / running_max
 ) - 1
 
-
-max_drawdown = (
-    drawdown.min()
-)
+max_drawdown = drawdown.min()
 
 
 # --------------------------------------------------
-# Results
+# VALIDATION
 # --------------------------------------------------
 
+daily_weight_sum = (
+    df.groupby("date")["portfolio_weight"]
+    .sum()
+)
+
+print("\n==============================")
+print("SENTIMENT PORTFOLIO")
+print("==============================")
+
 print(
-    "\n=============================="
+    f"Trading Days: {len(portfolio)}"
 )
 
 print(
-    "SENTIMENT PORTFOLIO"
-)
-
-print(
-    "=============================="
+    f"Average Stocks Per Day: "
+    f"{df.groupby('date')['ticker'].nunique().mean():.2f}"
 )
 
 print(
@@ -438,21 +305,9 @@ print(
 )
 
 
-# --------------------------------------------------
-# Turnover analysis
-# --------------------------------------------------
-
-print(
-    "\n=============================="
-)
-
-print(
-    "TURNOVER ANALYSIS"
-)
-
-print(
-    "=============================="
-)
+print("\n==============================")
+print("TURNOVER ANALYSIS")
+print("==============================")
 
 print(
     f"Transaction cost rate: "
@@ -479,27 +334,10 @@ print(
     f"{portfolio['transaction_cost'].sum():.4f}"
 )
 
-print(
-    f"Ongoing transaction costs: "
-    f"{portfolio['ongoing_transaction_cost'].sum():.4f}"
-)
 
-
-# --------------------------------------------------
-# Weight validation
-# --------------------------------------------------
-
-print(
-    "\n=============================="
-)
-
-print(
-    "WEIGHT VALIDATION"
-)
-
-print(
-    "=============================="
-)
+print("\n==============================")
+print("WEIGHT VALIDATION")
+print("==============================")
 
 print(
     f"Minimum weight observed: "
@@ -510,14 +348,6 @@ print(
     f"Maximum weight observed: "
     f"{df['portfolio_weight'].max():.4f}"
 )
-
-
-daily_weight_sum = (
-    df.groupby("date")[
-        "portfolio_weight"
-    ].sum()
-)
-
 
 print(
     f"Minimum daily weight sum: "
@@ -530,8 +360,19 @@ print(
 )
 
 
+print("\n==============================")
+print("STOCKS PER DAY")
+print("==============================")
+
+print(
+    df.groupby("date")["ticker"]
+    .nunique()
+    .to_string()
+)
+
+
 # --------------------------------------------------
-# Save portfolio weights
+# SAVE RESULTS
 # --------------------------------------------------
 
 df.to_csv(
@@ -539,13 +380,10 @@ df.to_csv(
     index=False
 )
 
-
-# Save portfolio results
 portfolio.to_csv(
     RESULTS_FILE,
     index=False
 )
-
 
 print(
     f"\nSaved portfolio weights to "
@@ -557,14 +395,7 @@ print(
     f"{RESULTS_FILE}"
 )
 
-
-# --------------------------------------------------
-# Sample weights
-# --------------------------------------------------
-
-print(
-    "\nSample weights:"
-)
+print("\nSample weights:")
 
 print(
     df[
@@ -577,14 +408,7 @@ print(
     ].head(15)
 )
 
-
-# --------------------------------------------------
-# Sample turnover
-# --------------------------------------------------
-
-print(
-    "\nSample turnover:"
-)
+print("\nSample turnover:")
 
 print(
     portfolio[
