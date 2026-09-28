@@ -71,13 +71,21 @@ def fetch_all_headlines(tickers, name_map, start, end, api_key):
 
 
 if __name__ == "__main__":
-    if NEWS_API_KEY == "YOUR_NEWSAPI_KEY_HERE":
-        raise SystemExit("Set NEWS_API_KEY in config.py first — get a free key at https://newsapi.org/register")
+    if not NEWS_API_KEY:
+        raise SystemExit("NEWS_API_KEY not found. Check your .env file.")
 
     end = datetime.today().strftime("%Y-%m-%d")
-    start = (datetime.today() - timedelta(days=29)).strftime("%Y-%m-%d")  # free tier's 30-day window
+    start = (datetime.today() - timedelta(days=29)).strftime("%Y-%m-%d")
 
-    headlines = fetch_all_headlines(TICKERS, TICKER_TO_NAME, start, end, NEWS_API_KEY)
+    headlines = fetch_all_headlines(
+        TICKERS,
+        TICKER_TO_NAME,
+        start,
+        end,
+        NEWS_API_KEY
+    )
+
     headlines.to_csv("data/headlines.csv", index=False)
+
     print(f"\nSaved {len(headlines)} headlines to data/headlines.csv")
     print(headlines.head())
