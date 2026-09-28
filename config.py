@@ -14,10 +14,10 @@ TICKERS = [
 ]
 
 
-# Company names used for NewsAPI searches
+# Company names / keywords used for NewsAPI headline searches
 TICKER_TO_NAME = {
-    "RELIANCE.NS": "Reliance Industries",
-    "TCS.NS": "Tata Consultancy Services",
+    "RELIANCE.NS": "Reliance",
+    "TCS.NS": "TCS",
     "INFY.NS": "Infosys",
     "HDFCBANK.NS": "HDFC Bank",
     "ICICIBANK.NS": "ICICI Bank"
